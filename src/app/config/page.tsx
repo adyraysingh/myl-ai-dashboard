@@ -16,11 +16,19 @@ export default function ConfigPage() {
     setLoading(true); setError(null)
     try {
       const [c, a] = await Promise.all([getPlatformConfig(), getPlatformAudit()])
-      const configArr = Array.isArray(c) ? c : c?.config ?? c?.settings ?? Object.entries(c||{}).map(([k,v]) => ({key:k, value:v}))
-      const auditArr = Array.isArray(a) ? a : a?.audit ?? a?.logs ?? []
+      // /api/platform/config: { config: [{ config_id, config_key, config_value, description }] }
+      const configArr = Array.isArray(c?.config) ? c.config :
+                        Array.isArray(c) ? c :
+                        Object.entries(c||{}).filter(([k]) => k !== 'success').map(([k,v]) => ({config_key:k, config_value:v}))
+      // /api/platform/audit: { audit: [{ audit_id, action, performed_by, resource_type, created_at }] }
+      const auditArr = Array.isArray(a?.audit) ? a.audit :
+                       Array.isArray(a) ? a : []
       setConfig(configArr); setAudit(auditArr)
       const vals: Record<string,string> = {}
-      configArr.forEach((item:any) => { vals[item.key || item.name] = String(item.value ?? '') })
+      configArr.forEach((item:any) => {
+        const k = item.config_key || item.key || item.name
+        if (k) vals[k] = String(item.config_value ?? item.value ?? '')
+      })
       setEditVals(vals)
     } catch(e:any) { setError(e.message) }
     setLoading(false)
@@ -36,7 +44,7 @@ export default function ConfigPage() {
   useEffect(() => { load() }, [])
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500" /></div>
-  if (error) return <div className="text-red-400 p-4 bg-red-900/20 rounded-lg">Error: {error}</div>
+  if (error) return <div className="text-red-400 p-4 bg-red-900/20 rounded-lg">Unable to load configuration. Please try again.</div>
 
   return (
     <div className="space-y-6">
@@ -72,7 +80,7 @@ export default function ConfigPage() {
               {config.length === 0 ? (
                 <tr><td colSpan={4} className="p-6 text-center text-[var(--muted-foreground)]">No configuration data</td></tr>
               ) : config.map((item:any, i:number) => {
-                const k = item.key || item.name || String(i)
+                const k = item.config_key || item.key || item.name || String(i)
                 return (
                   <tr key={k} className="border-b border-[var(--border)] last:border-0">
                     <td className="p-3 font-mono text-indigo-300 text-xs">{k}</td>
@@ -111,9 +119,9 @@ export default function ConfigPage() {
               ) : audit.map((a:any, i:number) => (
                 <tr key={i} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--muted)]/30">
                   <td className="p-3"><div className="flex items-center gap-2"><Shield size={14} className="text-indigo-400" /><span className="text-[var(--foreground)]">{a.action || a.event || '—'}</span></div></td>
-                  <td className="p-3 text-[var(--muted-foreground)]">{a.user || a.actor || a.userId || '—'}</td>
-                  <td className="p-3 text-[var(--muted-foreground)]">{a.resource || a.target || '—'}</td>
-                  <td className="p-3 text-[var(--muted-foreground)] text-xs">{a.createdAt || a.timestamp ? new Date(a.createdAt || a.timestamp).toLocaleString() : '—'}</td>
+                  <td className="p-3 text-[var(--muted-foreground)]">{a.performed_by || a.user || a.actor || a.userId || '—'}</td>
+                  <td className="p-3 text-[var(--muted-foreground)]">{a.resource_type ? `${a.resource_type}${a.resource_id ? `: ${a.resource_id.slice?.(0,8)}` : ''}` : a.resource || a.target || '—'}</td>
+                  <td className="p-3 text-[var(--muted-foreground)] text-xs">{a.created_at || a.timestamp ? new Date(a.created_at || a.timestamp).toLocaleString() : '—'}</td>
                 </tr>
               ))}
             </tbody>
