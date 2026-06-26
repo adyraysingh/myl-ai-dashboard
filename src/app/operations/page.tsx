@@ -21,9 +21,24 @@ export default function OperationsPage() {
   useEffect(() => { load() }, [])
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500" /></div>
-  if (error) return <div className="text-red-400 p-4 bg-red-900/20 rounded-lg">Error: {error}</div>
+  if (error) return <div className="text-red-400 p-4 bg-red-900/20 rounded-lg">Unable to load operations data. Please try again.</div>
 
-  const wfList = Array.isArray(workflows) ? workflows : workflows?.workflows ?? []
+  // /api/operations/workflows: { success, workflows: [...], count, metrics: {...} }
+  // Each workflow: { workflow_id, workflow_type, priority, status, trigger_event, retry_count, ... }
+  const wfList = Array.isArray(workflows?.workflows) ? workflows.workflows :
+                 Array.isArray(workflows) ? workflows : []
+
+  // /api/operations/metrics: { success, metrics: { workflows: {...}, sla: {...} } }
+  const wfMetrics = metrics?.metrics?.workflows || {}
+  const slaMetrics = metrics?.metrics?.sla || {}
+
+  const statusColor = (s: string) => {
+    const st = (s || '').toLowerCase()
+    if (st === 'completed' || st === 'active' || st === 'running') return 'bg-green-900/40 text-green-400'
+    if (st === 'pending') return 'bg-yellow-900/40 text-yellow-400'
+    if (st === 'failed') return 'bg-red-900/40 text-red-400'
+    return 'bg-gray-700 text-gray-400'
+  }
 
   return (
     <div className="space-y-6">
@@ -49,10 +64,10 @@ export default function OperationsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--border)] bg-[var(--muted)]">
-                <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Workflow</th>
+                <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Workflow Type</th>
                 <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Trigger</th>
-                <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Runs</th>
-                <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Success Rate</th>
+                <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Priority</th>
+                <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Retries</th>
                 <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Status</th>
               </tr>
             </thead>
@@ -61,11 +76,11 @@ export default function OperationsPage() {
                 <tr><td colSpan={5} className="p-6 text-center text-[var(--muted-foreground)]">No workflow data</td></tr>
               ) : wfList.map((w:any, i:number) => (
                 <tr key={i} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--muted)]/30">
-                  <td className="p-3"><div className="flex items-center gap-2"><Settings2 size={14} className="text-indigo-400" /><span className="text-[var(--foreground)]">{w.name || 'Unknown'}</span></div></td>
-                  <td className="p-3 text-[var(--muted-foreground)]">{w.trigger || '—'}</td>
-                  <td className="p-3 text-[var(--muted-foreground)]">{w.runs ?? w.executions ?? '—'}</td>
-                  <td className="p-3"><span className={`text-xs ${(w.successRate || 0) >= 90 ? 'text-green-400' : (w.successRate || 0) >= 70 ? 'text-yellow-400' : 'text-red-400'}`}>{w.successRate ? `${w.successRate}%` : '—'}</span></td>
-                  <td className="p-3"><span className={`text-xs px-2 py-0.5 rounded-full ${w.status === 'active' || w.status === 'running' ? 'bg-green-900/40 text-green-400' : 'bg-gray-700 text-gray-400'}`}>{w.status || 'active'}</span></td>
+                  <td className="p-3"><div className="flex items-center gap-2"><Settings2 size={14} className="text-indigo-400" /><span className="text-[var(--foreground)] capitalize">{(w.workflow_type || w.name || w.type || `Workflow ${i+1}`).replace(/_/g,' ')}</span></div></td>
+                  <td className="p-3 text-[var(--muted-foreground)] capitalize">{(w.trigger_event || w.trigger || '—').replace(/_/g, ' ')}</td>
+                  <td className="p-3"><span className={`text-xs px-2 py-0.5 rounded-full ${w.priority === 'high' || w.priority === 'critical' ? 'bg-red-900/40 text-red-400' : w.priority === 'medium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-blue-900/40 text-blue-400'}`}>{w.priority || '—'}</span></td>
+                  <td className="p-3 text-[var(--muted-foreground)]">{w.retry_count != null ? `${w.retry_count}/${w.max_retries || '—'}` : '—'}</td>
+                  <td className="p-3"><span className={`text-xs px-2 py-0.5 rounded-full ${statusColor(w.status)}`}>{w.status || 'unknown'}</span></td>
                 </tr>
               ))}
             </tbody>
@@ -74,10 +89,17 @@ export default function OperationsPage() {
       )}
       {tab === 'metrics' && (
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-          {metrics && Object.entries(metrics).filter(([k]) => typeof metrics[k] !== 'object').map(([k,v]:any) => (
-            <div key={k} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4">
-              <div className="text-xs text-[var(--muted-foreground)] mb-1 capitalize">{k.replace(/_/g,' ')}</div>
-              <div className="text-xl font-bold text-white">{String(v)}</div>
+          {[
+            { label: 'Total Workflows', value: wfMetrics.total || '0' },
+            { label: 'Completed', value: wfMetrics.completed || '0' },
+            { label: 'Failed', value: wfMetrics.failed || '0' },
+            { label: 'Cancelled', value: wfMetrics.cancelled || '0' },
+            { label: 'Success Rate', value: wfMetrics.success_rate ? `${parseFloat(wfMetrics.success_rate).toFixed(1)}%` : '0%' },
+            { label: 'SLA Breached', value: slaMetrics.breached || '0' },
+          ].map((item, i) => (
+            <div key={i} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4">
+              <div className="text-xs text-[var(--muted-foreground)] mb-1">{item.label}</div>
+              <div className="text-xl font-bold text-white">{item.value}</div>
             </div>
           ))}
         </div>
