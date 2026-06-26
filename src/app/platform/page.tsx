@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getModuleHealth, getQueueStatus, getPlatformIntegrations, getPlatformModels, getPlatformPrompts } from '@/lib/api'
+import { getPlatformModules, getQueueStatus, getPlatformIntegrations, getPlatformModels, getPlatformPrompts } from '@/lib/api'
 import { RefreshCw } from 'lucide-react'
 
 type PTab = 'modules'|'queues'|'integrations'|'models'|'prompts'
@@ -15,7 +15,7 @@ export default function PlatformPage() {
     setLoading(true); setError(null)
     try {
       const [modules, queues, integrations, models, prompts] = await Promise.all([
-        getModuleHealth(), getQueueStatus(), getPlatformIntegrations(), getPlatformModels(), getPlatformPrompts()
+        getPlatformModules(), getQueueStatus(), getPlatformIntegrations(), getPlatformModels(), getPlatformPrompts()
       ])
       setData({ modules, queues, integrations, models, prompts })
     } catch(e:any) { setError(e.message) }
@@ -24,19 +24,27 @@ export default function PlatformPage() {
   useEffect(() => { load() }, [])
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500" /></div>
-  if (error) return <div className="text-red-400 p-4 bg-red-900/20 rounded-lg">Error: {error}</div>
+  if (error) return <div className="text-red-400 p-4 bg-red-900/20 rounded-lg">Unable to load platform data. Please try again.</div>
 
   const sb = (status: string) => {
     const s = (status||'').toLowerCase()
-    const cls = s==='healthy'||s==='active'||s==='running'||s==='connected' ? 'bg-green-900/40 text-green-400' : s==='degraded'||s==='warning' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-red-900/40 text-red-400'
+    const cls = s==='healthy'||s==='active'||s==='running'||s==='connected' ? 'bg-green-900/40 text-green-400' :
+                s==='degraded'||s==='warning'||s==='available' ? 'bg-yellow-900/40 text-yellow-400' :
+                'bg-red-900/40 text-red-400'
     return <span className={`text-xs px-2 py-0.5 rounded-full ${cls}`}>{status||'unknown'}</span>
   }
 
-  const modules = Array.isArray(data.modules) ? data.modules : data.modules?.modules ?? []
-  const queues = Array.isArray(data.queues) ? data.queues : data.queues?.queues ?? []
-  const integrations = Array.isArray(data.integrations) ? data.integrations : data.integrations?.integrations ?? []
-  const models = Array.isArray(data.models) ? data.models : data.models?.models ?? []
-  const prompts = Array.isArray(data.prompts) ? data.prompts : data.prompts?.prompts ?? []
+  // Map API field names correctly
+  const modules = Array.isArray(data.modules?.modules) ? data.modules.modules :
+                  Array.isArray(data.modules) ? data.modules : []
+  const queues = Array.isArray(data.queues?.queues) ? data.queues.queues :
+                 Array.isArray(data.queues) ? data.queues : []
+  const integrations = Array.isArray(data.integrations?.integrations) ? data.integrations.integrations :
+                       Array.isArray(data.integrations) ? data.integrations : []
+  const models = Array.isArray(data.models?.models) ? data.models.models :
+                 Array.isArray(data.models) ? data.models : []
+  const prompts = Array.isArray(data.prompts?.prompts) ? data.prompts.prompts :
+                  Array.isArray(data.prompts) ? data.prompts : []
 
   return (
     <div className="space-y-6">
@@ -58,11 +66,14 @@ export default function PlatformPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {modules.length===0 ? <div className="text-[var(--muted-foreground)]">No module data</div> : modules.map((m:any,i:number) => (
             <div key={i} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4">
-              <div className="flex items-center justify-between mb-2"><div className="font-medium text-white">{m.name||`Module ${i+1}`}</div>{sb(m.status)}</div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-medium text-white capitalize">{(m.module_name || m.name || `Module ${i+1}`).replace(/_/g,' ')}</div>
+                {sb(m.status)}
+              </div>
               <div className="grid grid-cols-3 gap-2 mt-3">
-                <div className="text-center"><div className="text-xs text-[var(--muted-foreground)]">Calls</div><div className="text-sm font-medium text-white">{m.calls??m.requests??'—'}</div></div>
-                <div className="text-center"><div className="text-xs text-[var(--muted-foreground)]">Errors</div><div className="text-sm font-medium text-red-400">{m.errors??'—'}</div></div>
-                <div className="text-center"><div className="text-xs text-[var(--muted-foreground)]">Latency</div><div className="text-sm font-medium text-white">{m.latency?`${m.latency}ms`:'—'}</div></div>
+                <div className="text-center"><div className="text-xs text-[var(--muted-foreground)]">Calls Today</div><div className="text-sm font-medium text-white">{m.api_calls_today ?? m.calls ?? '—'}</div></div>
+                <div className="text-center"><div className="text-xs text-[var(--muted-foreground)]">Errors</div><div className="text-sm font-medium text-red-400">{m.errors_today ?? m.errors ?? '—'}</div></div>
+                <div className="text-center"><div className="text-xs text-[var(--muted-foreground)]">Latency</div><div className="text-sm font-medium text-white">{m.avg_latency_ms ? `${Math.round(m.avg_latency_ms)}ms` : m.latency ? `${m.latency}ms` : '—'}</div></div>
               </div>
             </div>
           ))}
@@ -74,18 +85,20 @@ export default function PlatformPage() {
             <thead><tr className="border-b border-[var(--border)] bg-[var(--muted)]">
               <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Queue</th>
               <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Pending</th>
-              <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Processing</th>
+              <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Running</th>
               <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Completed</th>
+              <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Failed</th>
               <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Status</th>
             </tr></thead>
             <tbody>
-              {queues.length===0 ? <tr><td colSpan={5} className="p-6 text-center text-[var(--muted-foreground)]">No queue data</td></tr>
+              {queues.length===0 ? <tr><td colSpan={6} className="p-6 text-center text-[var(--muted-foreground)]">No queue data</td></tr>
               : queues.map((q:any,i:number) => (
                 <tr key={i} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--muted)]/30">
-                  <td className="p-3 text-[var(--foreground)]">{q.name||`Queue ${i+1}`}</td>
-                  <td className="p-3 text-yellow-400">{q.pending??q.waiting??'—'}</td>
-                  <td className="p-3 text-blue-400">{q.processing??q.active??'—'}</td>
-                  <td className="p-3 text-green-400">{q.completed??q.done??'—'}</td>
+                  <td className="p-3 text-[var(--foreground)] capitalize">{(q.queue_name || q.name || `Queue ${i+1}`).replace(/_/g,' ')}</td>
+                  <td className="p-3 text-yellow-400">{q.pending_jobs ?? q.pending ?? '—'}</td>
+                  <td className="p-3 text-blue-400">{q.running_jobs ?? q.running ?? '—'}</td>
+                  <td className="p-3 text-green-400">{q.completed_jobs ?? q.completed ?? '—'}</td>
+                  <td className="p-3 text-red-400">{q.failed_jobs ?? q.failed ?? '—'}</td>
                   <td className="p-3">{sb(q.status)}</td>
                 </tr>
               ))}
@@ -96,9 +109,18 @@ export default function PlatformPage() {
       {tab==='integrations' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {integrations.length===0 ? <div className="text-[var(--muted-foreground)]">No integration data</div> : integrations.map((int:any,i:number) => (
-            <div key={i} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4 flex items-center justify-between">
-              <div><div className="font-medium text-white">{int.name||int.provider||`Integration ${i+1}`}</div><div className="text-xs text-[var(--muted-foreground)] mt-0.5">{int.type||int.service||''}</div></div>
-              {sb(int.status||'unknown')}
+            <div key={i} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <div className="font-medium text-white capitalize">{(int.integration_name || int.name || `Integration ${i+1}`).replace(/_/g,' ')}</div>
+                  <div className="text-xs text-[var(--muted-foreground)] mt-0.5 capitalize">{(int.integration_type || int.type || '').replace(/_/g,' ')}</div>
+                </div>
+                {sb(int.status||'unknown')}
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <div className="text-xs text-[var(--muted-foreground)]">Latency: <span className="text-white">{int.latency_ms ? `${parseFloat(int.latency_ms).toFixed(0)}ms` : '—'}</span></div>
+                <div className="text-xs text-[var(--muted-foreground)]">Errors: <span className="text-red-400">{int.error_count ?? '—'}</span></div>
+              </div>
             </div>
           ))}
         </div>
@@ -108,8 +130,8 @@ export default function PlatformPage() {
           <table className="w-full text-sm">
             <thead><tr className="border-b border-[var(--border)] bg-[var(--muted)]">
               <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Model</th>
-              <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Provider</th>
-              <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Calls</th>
+              <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Version</th>
+              <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Total Calls</th>
               <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Avg Latency</th>
               <th className="text-left p-3 text-[var(--muted-foreground)] font-medium">Status</th>
             </tr></thead>
@@ -117,10 +139,10 @@ export default function PlatformPage() {
               {models.length===0 ? <tr><td colSpan={5} className="p-6 text-center text-[var(--muted-foreground)]">No model data</td></tr>
               : models.map((m:any,i:number) => (
                 <tr key={i} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--muted)]/30">
-                  <td className="p-3 text-[var(--foreground)]">{m.name||m.model||m.id||`Model ${i+1}`}</td>
-                  <td className="p-3 text-[var(--muted-foreground)]">{m.provider||'—'}</td>
-                  <td className="p-3 text-[var(--muted-foreground)]">{m.calls??m.totalCalls??'—'}</td>
-                  <td className="p-3 text-[var(--muted-foreground)]">{m.avgLatency?`${m.avgLatency}ms`:'—'}</td>
+                  <td className="p-3 text-[var(--foreground)]">{m.model_name || m.name || m.id || `Model ${i+1}`}</td>
+                  <td className="p-3 text-[var(--muted-foreground)]">{m.model_version || m.version || '—'}</td>
+                  <td className="p-3 text-[var(--muted-foreground)]">{m.total_calls ?? m.calls ?? '—'}</td>
+                  <td className="p-3 text-[var(--muted-foreground)]">{m.avg_latency_ms ? `${Math.round(m.avg_latency_ms)}ms` : '—'}</td>
                   <td className="p-3">{sb(m.status||'active')}</td>
                 </tr>
               ))}
@@ -132,10 +154,14 @@ export default function PlatformPage() {
         <div className="space-y-3">
           {prompts.length===0 ? <div className="text-[var(--muted-foreground)]">No prompt data</div> : prompts.map((p:any,i:number) => (
             <div key={i} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4">
-              <div className="flex items-center justify-between mb-2"><div className="font-medium text-white">{p.name||p.promptId||p.id||`Prompt ${i+1}`}</div><span className="text-xs text-[var(--muted-foreground)]">{p.version?`v${p.version}`:''}</span></div>
-              {p.content && <div className="text-xs text-[var(--muted-foreground)] font-mono bg-[var(--muted)] p-2 rounded mt-2 max-h-20 overflow-y-auto">{p.content}</div>}
-              <div className="flex gap-4 mt-2 text-xs text-[var(--muted-foreground)]">
-                {p.module && <span>Module: {p.module}</span>}{p.uses && <span>Uses: {p.uses}</span>}{p.updatedAt && <span>Updated: {new Date(p.updatedAt).toLocaleDateString()}</span>}
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-medium text-white capitalize">{(p.prompt_name || p.name || p.promptId || `Prompt ${i+1}`).replace(/_/g,' ')}</div>
+                <span className="text-xs text-[var(--muted-foreground)]">{p.version ? `v${p.version}` : ''}</span>
+              </div>
+              <div className="flex gap-4 text-xs text-[var(--muted-foreground)]">
+                {p.module_name && <span>Module: <span className="text-white capitalize">{p.module_name.replace(/_/g,' ')}</span></span>}
+                {p.prompt_type && <span>Type: <span className="text-white capitalize">{p.prompt_type.replace(/_/g,' ')}</span></span>}
+                {p.active != null && <span>Active: <span className={p.active ? 'text-green-400' : 'text-red-400'}>{p.active ? 'Yes' : 'No'}</span></span>}
               </div>
             </div>
           ))}
