@@ -26,9 +26,11 @@ export default function ErrorsPage() {
   useEffect(() => { load() }, [])
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500" /></div>
-  if (error) return <div className="text-red-400 p-4 bg-red-900/20 rounded-lg">Error: {error}</div>
+  if (error) return <div className="text-red-400 p-4 bg-red-900/20 rounded-lg">Unable to load error data. Please try again.</div>
 
-  const errors = Array.isArray(data) ? data : data?.errors ?? []
+  // /api/platform/errors: { success, errors: [{ error_id, module_name, severity, error_message, status, created_at }] }
+  const errors = Array.isArray(data?.errors) ? data.errors :
+                 Array.isArray(data) ? data : []
 
   return (
     <div className="space-y-6">
@@ -56,28 +58,36 @@ export default function ErrorsPage() {
           <tbody>
             {errors.length === 0 ? (
               <tr><td colSpan={6} className="p-6 text-center text-[var(--muted-foreground)]">No errors found</td></tr>
-            ) : errors.map((e:any, i:number) => (
-              <tr key={i} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--muted)]/30">
-                <td className="p-3 text-[var(--foreground)]">{e.module || '—'}</td>
-                <td className="p-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${e.severity === 'critical' || e.severity === 'high' ? 'bg-red-900/40 text-red-400' : e.severity === 'medium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-blue-900/40 text-blue-400'}`}>{e.severity || 'low'}</span>
-                </td>
-                <td className="p-3 text-[var(--foreground)] max-w-xs truncate">{e.message || e.error || '—'}</td>
-                <td className="p-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${e.status === 'resolved' ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'}`}>{e.status || 'open'}</span>
-                </td>
-                <td className="p-3 text-[var(--muted-foreground)] text-xs">{e.createdAt || e.timestamp ? new Date(e.createdAt || e.timestamp).toLocaleString() : '—'}</td>
-                <td className="p-3">
-                  {e.status !== 'resolved' && (
-                    <button onClick={() => handleRetry(e.id || e._id || String(i))} disabled={resolving === (e.id || e._id || String(i))}
-                      className="flex items-center gap-1 px-2 py-1 text-xs bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded transition-colors text-white">
-                      <RotateCcw size={11} />
-                      {resolving === (e.id || e._id || String(i)) ? 'Retrying...' : 'Retry'}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
+            ) : errors.map((e:any, i:number) => {
+              const errorId = e.error_id || e.id || e._id || String(i)
+              const moduleName = e.module_name || e.module || '—'
+              const severity = e.severity || 'low'
+              const message = e.error_message || e.message || e.error || '—'
+              const status = e.status || 'open'
+              const createdAt = e.created_at || e.createdAt || e.timestamp || null
+              return (
+                <tr key={i} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--muted)]/30">
+                  <td className="p-3 text-[var(--foreground)] capitalize">{moduleName.replace(/_/g,' ')}</td>
+                  <td className="p-3">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${severity === 'critical' || severity === 'high' ? 'bg-red-900/40 text-red-400' : severity === 'medium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-blue-900/40 text-blue-400'}`}>{severity}</span>
+                  </td>
+                  <td className="p-3 text-[var(--foreground)] max-w-xs truncate">{message}</td>
+                  <td className="p-3">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${status === 'resolved' ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'}`}>{status}</span>
+                  </td>
+                  <td className="p-3 text-[var(--muted-foreground)] text-xs">{createdAt ? new Date(createdAt).toLocaleString() : '—'}</td>
+                  <td className="p-3">
+                    {status !== 'resolved' && (
+                      <button onClick={() => handleRetry(errorId)} disabled={resolving === errorId}
+                        className="flex items-center gap-1 px-2 py-1 text-xs bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded transition-colors text-white">
+                        <RotateCcw size={11} />
+                        {resolving === errorId ? 'Retrying...' : 'Retry'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
