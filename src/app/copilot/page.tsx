@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import { sendCopilotMessage } from '@/lib/api'
 import { Send, Bot, User } from 'lucide-react'
 
-interface Message { role: 'user'|'assistant'; content: string; time: string }
+interface Message { role: 'user'|'assistant'; content: string; time: string; intent?: string; confidence?: number }
 
 export default function CopilotPage() {
   const [messages, setMessages] = useState<Message[]>([
@@ -11,6 +11,7 @@ export default function CopilotPage() {
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [sessionId, setSessionId] = useState<string|undefined>(undefined)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
@@ -19,13 +20,29 @@ export default function CopilotPage() {
     if (!input.trim() || loading) return
     const userMsg: Message = { role: 'user', content: input, time: new Date().toLocaleTimeString() }
     setMessages(prev => [...prev, userMsg])
+    const q = input
     setInput('')
     setLoading(true)
     try {
-      const res = await sendCopilotMessage(input)
-      setMessages(prev => [...prev, { role: 'assistant', content: res?.message || res?.response || JSON.stringify(res), time: new Date().toLocaleTimeString() }])
+      const res = await sendCopilotMessage(q, sessionId)
+      // Persist session for follow-up conversation memory
+      if (res?.session_id) setSessionId(res.session_id)
+      // Backend response: { success, executive_summary, intent, confidence, ... }
+      const content = res?.executive_summary || res?.response || res?.message ||
+                      (res?.success === false ? (res?.error || 'Sorry, I could not process your request.') : JSON.stringify(res))
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content,
+        time: new Date().toLocaleTimeString(),
+        intent: res?.intent,
+        confidence: res?.confidence
+      }])
     } catch(e:any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${e.message}`, time: new Date().toLocaleTimeString() }])
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `I encountered an error: ${e.message}. Please try again.`,
+        time: new Date().toLocaleTimeString()
+      }])
     }
     setLoading(false)
   }
@@ -46,7 +63,11 @@ export default function CopilotPage() {
               <div className={`px-4 py-2.5 rounded-2xl text-sm ${m.role === 'assistant' ? 'bg-[var(--muted)] text-[var(--foreground)]' : 'bg-indigo-600 text-white'}`}>
                 {m.content}
               </div>
-              <span className="text-[10px] text-[var(--muted-foreground)] px-1">{m.time}</span>
+              <div className="flex items-center gap-2 px-1">
+                <span className="text-[10px] text-[var(--muted-foreground)]">{m.time}</span>
+                {m.intent && <span className="text-[10px] text-indigo-400">{m.intent.replace(/_/g, ' ')}</span>}
+                {m.confidence != null && <span className="text-[10px] text-green-400">{Math.round(m.confidence * 100)}% confidence</span>}
+              </div>
             </div>
           </div>
         ))}
