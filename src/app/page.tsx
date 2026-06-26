@@ -27,15 +27,27 @@ export default function CEODashboard() {
     </div>
   )
   if (error) return (
-    <div className="text-red-400 p-4 bg-red-900/20 rounded-lg">Error: {error}</div>
+    <div className="text-red-400 p-4 bg-red-900/20 rounded-lg">Unable to load dashboard. Please try again.</div>
   )
 
+  // getDashboard now calls /api/executive/summary
+  // response: { success, summary: { total_leads, hot_leads, warm_leads, ... } }
+  const summary = dashboard?.summary || {}
+
   const metrics = [
-    { label: 'Monthly Revenue', value: dashboard?.revenue?.monthly ? `$${(dashboard.revenue.monthly/1000).toFixed(0)}k` : '—', icon: DollarSign, color: 'text-green-400' },
-    { label: 'Active Leads', value: dashboard?.leads?.active ?? '—', icon: Users, color: 'text-blue-400' },
-    { label: 'Conversion Rate', value: dashboard?.leads?.conversionRate ? `${dashboard.leads.conversionRate}%` : '—', icon: TrendingUp, color: 'text-indigo-400' },
-    { label: 'AI Decisions Today', value: dashboard?.decisions?.today ?? '—', icon: Zap, color: 'text-yellow-400' },
+    { label: 'Total Leads', value: summary.total_leads != null ? String(summary.total_leads) : '—', icon: Users, color: 'text-blue-400' },
+    { label: 'Hot Leads', value: summary.hot_leads != null ? String(summary.hot_leads) : '—', icon: TrendingUp, color: 'text-green-400' },
+    { label: 'AI Decisions Today', value: summary.critical_decisions_pending != null ? String(summary.critical_decisions_pending) : '—', icon: Zap, color: 'text-yellow-400' },
+    { label: 'Active Investigations', value: summary.active_investigations != null ? String(summary.active_investigations) : '—', icon: DollarSign, color: 'text-indigo-400' },
   ]
+
+  // getModuleHealth now calls /api/platform/modules
+  // response: { success, modules: [{ module_name, status, health_score, ... }] }
+  const modules = Array.isArray(health) ? health : health?.modules ?? []
+
+  // getQueueStatus calls /api/platform/queues
+  // response: { success, queues: [{ queue_name, pending_jobs, status, ... }] }
+  const queueList = Array.isArray(queues) ? queues : queues?.queues ?? []
 
   return (
     <div className="space-y-6">
@@ -66,12 +78,15 @@ export default function CEODashboard() {
             <h2 className="font-semibold text-white">Module Health</h2>
           </div>
           <div className="space-y-2">
-            {health?.modules?.slice(0,6).map((m:any) => (
-              <div key={m.name} className="flex items-center justify-between py-1.5 border-b border-[var(--border)] last:border-0">
-                <span className="text-sm text-[var(--foreground)]">{m.name}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${m.status === 'healthy' ? 'bg-green-900/40 text-green-400' : m.status === 'degraded' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-red-900/40 text-red-400'}`}>{m.status}</span>
+            {modules.length > 0 ? modules.slice(0, 8).map((m: any, i: number) => (
+              <div key={i} className="flex items-center justify-between py-1.5 border-b border-[var(--border)] last:border-0">
+                <span className="text-sm text-[var(--foreground)]">{m.module_name || m.name || `Module ${i+1}`}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  (m.status||'').toLowerCase() === 'healthy' ? 'bg-green-900/40 text-green-400' :
+                  (m.status||'').toLowerCase() === 'degraded' ? 'bg-yellow-900/40 text-yellow-400' :
+                  'bg-red-900/40 text-red-400'}`}>{m.status || 'unknown'}</span>
               </div>
-            )) ?? <div className="text-sm text-[var(--muted-foreground)]">No module data</div>}
+            )) : <div className="text-sm text-[var(--muted-foreground)]">No module data</div>}
           </div>
         </div>
         <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5">
@@ -80,15 +95,15 @@ export default function CEODashboard() {
             <h2 className="font-semibold text-white">Queue Status</h2>
           </div>
           <div className="space-y-2">
-            {queues?.queues?.slice(0,6).map((q:any) => (
-              <div key={q.name} className="flex items-center justify-between py-1.5 border-b border-[var(--border)] last:border-0">
-                <span className="text-sm text-[var(--foreground)]">{q.name}</span>
+            {queueList.length > 0 ? queueList.slice(0, 8).map((q: any, i: number) => (
+              <div key={i} className="flex items-center justify-between py-1.5 border-b border-[var(--border)] last:border-0">
+                <span className="text-sm text-[var(--foreground)]">{q.queue_name || q.name || `Queue ${i+1}`}</span>
                 <div className="flex items-center gap-3 text-xs text-[var(--muted-foreground)]">
-                  <span>{q.pending ?? 0} pending</span>
+                  <span>{q.pending_jobs ?? q.pending ?? 0} pending</span>
                   <span className={`px-2 py-0.5 rounded-full ${q.status === 'running' ? 'bg-green-900/40 text-green-400' : 'bg-gray-700 text-gray-400'}`}>{q.status}</span>
                 </div>
               </div>
-            )) ?? <div className="text-sm text-[var(--muted-foreground)]">No queue data</div>}
+            )) : <div className="text-sm text-[var(--muted-foreground)]">No queue data</div>}
           </div>
         </div>
       </div>
