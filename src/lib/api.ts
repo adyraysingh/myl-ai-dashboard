@@ -1,18 +1,31 @@
+import { getAccessToken, setAccessToken, refreshRequest } from '@/lib/auth';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://maya-ai-sales-production.up.railway.app';
-
+let _refreshPromise: Promise<string | null> | null = null;
+async function _getValidToken(): Promise<string | null> {
+  const token = getAccessToken();
+  if (token) return token;
+  if (!_refreshPromise) { _refreshPromise = refreshRequest().finally(() => { _refreshPromise = null; }); }
+  const newToken = await _refreshPromise;
+  if (newToken) setAccessToken(newToken);
+  return newToken;
+}
 async function apiFetch(path: string, options?: RequestInit) {
-  const res = await fetch(API_BASE + path, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    ...options,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || 'API error ' + res.status);
+  const token = await _getValidToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options?.headers as Record<string, string>) };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(API_BASE + path, { credentials: 'include', ...options, headers });
+  if (res.status === 401) {
+    if (!_refreshPromise) { _refreshPromise = refreshRequest().finally(() => { _refreshPromise = null; }); }
+    const newToken = await _refreshPromise;
+    if (!newToken) { if (typeof window !== 'undefined') window.location.href = '/login'; throw new Error('Session expired'); }
+    setAccessToken(newToken);
+    const retryRes = await fetch(API_BASE + path, { credentials: 'include', ...options, headers: { ...headers, 'Authorization': 'Bearer ' + newToken } });
+    if (!retryRes.ok) { const err = await retryRes.json().catch(() => ({ error: retryRes.statusText })); throw new Error(err.error || 'API error ' + retryRes.status); }
+    return retryRes.json();
   }
+  if (!res.ok) { const err = await res.json().catch(() => ({ error: res.statusText })); throw new Error(err.error || 'API error ' + res.status); }
   return res.json();
 }
-
-// Platform
 export const getPlatformHealth = () => apiFetch('/api/platform/health');
 export const getModuleHealth = () => apiFetch('/api/platform/modules');
 export const getPlatformModules = () => apiFetch('/api/platform/modules');
@@ -22,28 +35,17 @@ export const getPlatformIntegrations = () => apiFetch('/api/platform/integration
 export const getPlatformModels = () => apiFetch('/api/platform/models');
 export const getPlatformPrompts = () => apiFetch('/api/platform/prompts');
 export const getPlatformCosts = () => apiFetch('/api/platform/costs');
-export const getPlatformErrors = (params?: Record<string, string>) => {
-  const qs = params ? '?' + new URLSearchParams(params).toString() : '';
-  return apiFetch('/api/platform/errors' + qs);
-};
+export const getPlatformErrors = (params?: Record<string, string>) => { const qs = params ? '?' + new URLSearchParams(params).toString() : ''; return apiFetch('/api/platform/errors' + qs); };
 export const getPlatformConfig = () => apiFetch('/api/platform/config');
 export const getPlatformAudit = () => apiFetch('/api/platform/audit');
 export const getPlatformDashboard = () => apiFetch('/api/platform/dashboard');
 export const getDashboard = () => apiFetch('/api/executive/summary');
-export const setPlatformConfig = (key: string, value: string, performed_by = 'admin') =>
-  apiFetch('/api/platform/config', { method: 'POST', body: JSON.stringify({ key, value, performed_by }) });
-export const retryError = (error_id: string) =>
-  apiFetch('/api/platform/errors/' + error_id + '/retry', { method: 'POST', body: JSON.stringify({ error_id }) });
-
-// Revenue
+export const setPlatformConfig = (key: string, value: string, performed_by = 'admin') => apiFetch('/api/platform/config', { method: 'POST', body: JSON.stringify({ key, value, performed_by }) });
+export const retryError = (error_id: string) => apiFetch('/api/platform/errors/' + error_id + '/retry', { method: 'POST', body: JSON.stringify({ error_id }) });
 export const getRevenueForecast = () => apiFetch('/api/revenue/forecast');
 export const getRevenueScenarios = () => apiFetch('/api/revenue/scenarios');
-
-// Operations
 export const getWorkflows = () => apiFetch('/api/operations/workflows');
 export const getOperationsMetrics = () => apiFetch('/api/operations/metrics');
-
-// Sales & Leads
 export const getDecisions = () => apiFetch('/api/decisions');
 export const getQualificationQueue = () => apiFetch('/api/qualification');
 export const getInvestigations = () => apiFetch('/api/investigations');
@@ -51,15 +53,9 @@ export const getConversations = () => apiFetch('/api/conversations');
 export const getSalesPerformance = () => apiFetch('/api/sales/performance');
 export const getExecutiveSummary = () => apiFetch('/api/executive/summary');
 export const getExecutiveBriefing = () => apiFetch('/api/executive/briefing');
-
-// Learning
 export const getLearningInsights = () => apiFetch('/api/learning/performance');
 export const getLearningOptimizations = () => apiFetch('/api/learning/optimizations');
 export const getCostAnalysis = () => apiFetch('/api/platform/costs');
-
-// Copilot — backend expects { question }, not { message }
-export const sendCopilotMessage = (question: string, session_id?: string) =>
-  apiFetch('/api/copilot/chat', { method: 'POST', body: JSON.stringify({ question, session_id }) });
+export const sendCopilotMessage = (question: string, session_id?: string) => apiFetch('/api/copilot/chat', { method: 'POST', body: JSON.stringify({ question, session_id }) });
 export const getCopilotHistory = () => apiFetch('/api/copilot/history');
-
 export default apiFetch;
