@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, TrendingUp, MessageSquare, Zap, UserCheck,
   Search, ShieldAlert, Users, BarChart2, Settings2, Brain,
-  DollarSign, AlertCircle, Settings, Activity
+  DollarSign, AlertCircle, Settings, Activity, Layers
 } from 'lucide-react'
 
 const navItems = [
@@ -22,6 +22,7 @@ const navItems = [
   { href: '/errors', label: 'Errors', icon: AlertCircle },
   { href: '/config', label: 'Config', icon: Settings },
   { href: '/platform', label: 'Platform', icon: Activity },
+  { href: '/queue', label: 'Queue Monitor', icon: Layers },
 ]
 
 export default function Sidebar() {
@@ -59,7 +60,7 @@ export default function Sidebar() {
         })}
       </nav>
       <div className="p-3 border-t border-[var(--border)]">
-        <div className="text-[10px] text-[var(--muted-foreground)]">v1.0.0 — Production</div>
+        <div className="text-[10px] text-[var(--muted-foreground)]">v2.0.0 — Durable Infrastructure</div>
       </div>
     </aside>
   )
