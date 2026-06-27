@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { api } from '../../lib/api';
+import apiFetch from '../../lib/api';
 
 interface QueueStat {
   queue_name: string;
@@ -45,14 +45,8 @@ interface QueueData {
   dlq_sample: DLQJob[];
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  running: 'text-green-400',
-  stopped: 'text-red-400',
-  degraded: 'text-yellow-400',
-};
-
 function formatMs(ms: number | null): string {
-  if (ms == null) return '—';
+  if (ms == null) return 'none';
   if (ms < 1000) return ms.toFixed(0) + 'ms';
   return (ms / 1000).toFixed(1) + 's';
 }
@@ -75,12 +69,12 @@ export default function QueueDashboard() {
 
   async function loadData() {
     try {
-      const res = await api.get('/api/queue/stats');
-      setData(res.data);
+      const res = await apiFetch('/api/queue/stats');
+      setData(res);
       setLastRefresh(new Date());
       setError(null);
     } catch (err: any) {
-      setError(err?.response?.data?.error || err.message || 'Failed to load queue stats');
+      setError(err?.message || 'Failed to load queue stats');
     } finally {
       setLoading(false);
     }
@@ -89,10 +83,10 @@ export default function QueueDashboard() {
   async function replayDLQ(id: number) {
     setReplayLoading(id);
     try {
-      await api.post('/api/queue/dlq/' + id + '/replay');
+      await apiFetch('/api/queue/dlq/' + id + '/replay', { method: 'POST' });
       await loadData();
     } catch (err: any) {
-      alert('Replay failed: ' + (err?.response?.data?.error || err.message));
+      alert('Replay failed: ' + err.message);
     } finally {
       setReplayLoading(null);
     }
@@ -121,102 +115,53 @@ export default function QueueDashboard() {
   const totalDLQ = (data?.queues || []).reduce((s, q) => s + (parseInt(String(q.dlq_count)) || 0), 0);
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-6">
+    <div className="min-h-screen text-white p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-white">Queue Dashboard</h1>
-            <p className="text-gray-400 text-sm mt-1">Phase 2 — Durable Infrastructure</p>
+            <h1 className="text-2xl font-bold text-white">Queue Monitor</h1>
+            <p className="text-gray-400 text-sm mt-1">Phase 2 — Durable Infrastructure · Auto-refresh 15s</p>
           </div>
           <div className="flex items-center gap-4">
             {lastRefresh && <span className="text-gray-500 text-xs">Updated {lastRefresh.toLocaleTimeString()}</span>}
-            <button onClick={loadData} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium transition-colors">
-              Refresh
-            </button>
+            <button onClick={loadData} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded text-sm font-medium">Refresh</button>
           </div>
         </div>
 
-        {/* Summary Cards */}
         <div className="grid grid-cols-3 gap-4 mb-8">
           <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
-            <div className="text-gray-400 text-xs uppercase tracking-wide mb-2">Pending Jobs</div>
+            <div className="text-gray-400 text-xs uppercase mb-2">Pending Jobs</div>
             <div className={`text-3xl font-bold ${totalPending > 0 ? 'text-yellow-400' : 'text-green-400'}`}>{totalPending}</div>
           </div>
           <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
-            <div className="text-gray-400 text-xs uppercase tracking-wide mb-2">Processing Now</div>
+            <div className="text-gray-400 text-xs uppercase mb-2">Processing Now</div>
             <div className={`text-3xl font-bold ${totalProcessing > 0 ? 'text-blue-400' : 'text-gray-400'}`}>{totalProcessing}</div>
           </div>
           <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
-            <div className="text-gray-400 text-xs uppercase tracking-wide mb-2">Dead Letter Queue</div>
+            <div className="text-gray-400 text-xs uppercase mb-2">Dead Letter Queue</div>
             <div className={`text-3xl font-bold ${totalDLQ > 0 ? 'text-red-400' : 'text-green-400'}`}>{totalDLQ}</div>
           </div>
         </div>
 
-        {/* Queue Stats */}
-        <div className="bg-gray-900 rounded-lg border border-gray-800 mb-8">
-          <div className="px-6 py-4 border-b border-gray-800">
-            <h2 className="text-lg font-semibold">Queue Status</h2>
-          </div>
+        <div className="bg-gray-900 rounded-lg border border-gray-800 mb-6">
+          <div className="px-6 py-4 border-b border-gray-800"><h2 className="text-lg font-semibold">Worker Status</h2></div>
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-800">
-                  <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Queue</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Pending</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Processing</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Completed</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Failed</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">DLQ</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Avg Latency</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Throughput/min</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data?.queues || []).map(q => (
-                  <tr key={q.queue_name} className="border-b border-gray-800 hover:bg-gray-800 transition-colors">
-                    <td className="px-6 py-4 font-medium text-white">{q.queue_name}</td>
-                    <td className={`px-6 py-4 text-right ${parseInt(String(q.pending)) > 0 ? 'text-yellow-400' : 'text-gray-400'}`}>{q.pending}</td>
-                    <td className={`px-6 py-4 text-right ${parseInt(String(q.processing)) > 0 ? 'text-blue-400' : 'text-gray-400'}`}>{q.processing}</td>
-                    <td className="px-6 py-4 text-right text-green-400">{q.completed}</td>
-                    <td className={`px-6 py-4 text-right ${parseInt(String(q.failed)) > 0 ? 'text-orange-400' : 'text-gray-400'}`}>{q.failed}</td>
-                    <td className={`px-6 py-4 text-right ${parseInt(String(q.dlq_count)) > 0 ? 'text-red-400 font-bold' : 'text-gray-400'}`}>{q.dlq_count}</td>
-                    <td className="px-6 py-4 text-right text-gray-300">{formatMs(q.avg_latency_ms)}</td>
-                    <td className="px-6 py-4 text-right text-gray-300">{q.throughput_per_min || 0}</td>
-                  </tr>
-                ))}
-                {(data?.queues || []).length === 0 && (
-                  <tr><td colSpan={8} className="px-6 py-8 text-center text-gray-500">No queue data — workers may still be starting up</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Worker Status */}
-        <div className="bg-gray-900 rounded-lg border border-gray-800 mb-8">
-          <div className="px-6 py-4 border-b border-gray-800">
-            <h2 className="text-lg font-semibold">Worker Status</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-800">
-                  <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Queue</th>
-                  <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Status</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Active Jobs</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Processed</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Failed</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">DLQ</th>
-                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Uptime</th>
-                </tr>
-              </thead>
+              <thead><tr className="border-b border-gray-800">
+                <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Queue</th>
+                <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Status</th>
+                <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Active</th>
+                <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Processed</th>
+                <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Failed</th>
+                <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">DLQ</th>
+                <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Uptime</th>
+              </tr></thead>
               <tbody>
                 {(data?.workers || []).map(w => (
-                  <tr key={w.queue_name} className="border-b border-gray-800 hover:bg-gray-800 transition-colors">
-                    <td className="px-6 py-4 font-medium text-white">{w.queue_name}</td>
+                  <tr key={w.queue_name} className="border-b border-gray-800 hover:bg-gray-800">
+                    <td className="px-6 py-4 font-medium">{w.queue_name}</td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1 ${w.running ? 'text-green-400' : 'text-red-400'}`}>
+                      <span className={`flex items-center gap-1 ${w.running ? 'text-green-400' : 'text-red-400'}`}>
                         <span className={`w-2 h-2 rounded-full ${w.running ? 'bg-green-400' : 'bg-red-400'}`}></span>
                         {w.running ? 'Running' : 'Stopped'}
                       </span>
@@ -236,7 +181,38 @@ export default function QueueDashboard() {
           </div>
         </div>
 
-        {/* Dead Letter Queue */}
+        <div className="bg-gray-900 rounded-lg border border-gray-800 mb-6">
+          <div className="px-6 py-4 border-b border-gray-800"><h2 className="text-lg font-semibold">Queue Statistics</h2></div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead><tr className="border-b border-gray-800">
+                <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Queue</th>
+                <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Pending</th>
+                <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Processing</th>
+                <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Completed</th>
+                <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Failed</th>
+                <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">DLQ</th>
+                <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Avg Latency</th>
+              </tr></thead>
+              <tbody>
+                {(data?.queues || []).length === 0 ? (
+                  <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500">No queue data yet — workers are polling</td></tr>
+                ) : (data?.queues || []).map(q => (
+                  <tr key={q.queue_name} className="border-b border-gray-800 hover:bg-gray-800">
+                    <td className="px-6 py-4 font-medium">{q.queue_name}</td>
+                    <td className={`px-6 py-4 text-right ${parseInt(String(q.pending)) > 0 ? 'text-yellow-400' : 'text-gray-400'}`}>{q.pending}</td>
+                    <td className={`px-6 py-4 text-right ${parseInt(String(q.processing)) > 0 ? 'text-blue-400' : 'text-gray-400'}`}>{q.processing}</td>
+                    <td className="px-6 py-4 text-right text-green-400">{q.completed}</td>
+                    <td className={`px-6 py-4 text-right ${parseInt(String(q.failed)) > 0 ? 'text-orange-400' : 'text-gray-400'}`}>{q.failed}</td>
+                    <td className={`px-6 py-4 text-right ${parseInt(String(q.dlq_count)) > 0 ? 'text-red-400 font-bold' : 'text-gray-400'}`}>{q.dlq_count}</td>
+                    <td className="px-6 py-4 text-right text-gray-300">{formatMs(q.avg_latency_ms)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div className="bg-gray-900 rounded-lg border border-gray-800">
           <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Dead Letter Queue</h2>
@@ -244,43 +220,36 @@ export default function QueueDashboard() {
               {totalDLQ} jobs
             </span>
           </div>
-          <div className="overflow-x-auto">
-            {(data?.dlq_sample || []).length === 0 ? (
-              <div className="px-6 py-8 text-center text-gray-500">
-                <div className="text-green-400 text-2xl mb-2">✓</div>
-                <div>Dead Letter Queue is empty — all jobs are processing normally</div>
-              </div>
-            ) : (
+          {(data?.dlq_sample || []).length === 0 ? (
+            <div className="px-6 py-8 text-center text-gray-500">
+              <div className="text-green-400 text-2xl mb-2">✓</div>
+              <div>Dead Letter Queue is empty — all jobs processing normally</div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
               <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-800">
-                    <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">ID</th>
-                    <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Queue</th>
-                    <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Job Type</th>
-                    <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Failure Reason</th>
-                    <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Attempts</th>
-                    <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Failed At</th>
-                    <th className="px-6 py-3 text-center text-xs text-gray-400 uppercase">Action</th>
-                  </tr>
-                </thead>
+                <thead><tr className="border-b border-gray-800">
+                  <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">ID</th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Queue</th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Job Type</th>
+                  <th className="px-6 py-3 text-left text-xs text-gray-400 uppercase">Failure</th>
+                  <th className="px-6 py-3 text-right text-xs text-gray-400 uppercase">Attempts</th>
+                  <th className="px-6 py-3 text-center text-xs text-gray-400 uppercase">Action</th>
+                </tr></thead>
                 <tbody>
                   {data?.dlq_sample?.map(job => (
-                    <tr key={job.id} className="border-b border-gray-800 hover:bg-gray-800 transition-colors">
+                    <tr key={job.id} className="border-b border-gray-800 hover:bg-gray-800">
                       <td className="px-6 py-4 text-gray-400 text-sm">{job.id}</td>
                       <td className="px-6 py-4 text-white text-sm">{job.queue_name}</td>
                       <td className="px-6 py-4 text-gray-300 text-sm">{job.job_type}</td>
                       <td className="px-6 py-4 text-red-300 text-sm max-w-xs truncate">{job.failure_reason}</td>
                       <td className="px-6 py-4 text-right text-orange-400 text-sm">{job.attempts}</td>
-                      <td className="px-6 py-4 text-right text-gray-400 text-sm">{new Date(job.moved_at).toLocaleString()}</td>
                       <td className="px-6 py-4 text-center">
                         {job.replayed_at ? (
                           <span className="text-gray-500 text-xs">Replayed</span>
                         ) : (
-                          <button
-                            onClick={() => replayDLQ(job.id)}
-                            disabled={replayLoading === job.id}
-                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded text-xs font-medium transition-colors"
-                          >
+                          <button onClick={() => replayDLQ(job.id)} disabled={replayLoading === job.id}
+                            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded text-xs font-medium">
                             {replayLoading === job.id ? 'Replaying...' : 'Replay'}
                           </button>
                         )}
@@ -289,8 +258,8 @@ export default function QueueDashboard() {
                   ))}
                 </tbody>
               </table>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
