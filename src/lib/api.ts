@@ -1,31 +1,64 @@
 import { getAccessToken, setAccessToken, refreshRequest } from '@/lib/auth';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://maya-ai-sales-production.up.railway.app';
 let _refreshPromise: Promise<string | null> | null = null;
+const _inflight: Map<string, Promise<any>> = new Map();
+const _cache: Map<string, { data: any; ts: number }> = new Map();
+const CACHE_TTL = 30000;
+const REQUEST_TIMEOUT = 10000;
 async function _getValidToken(): Promise<string | null> {
-  const token = getAccessToken();
-  if (token) return token;
-  if (!_refreshPromise) { _refreshPromise = refreshRequest().finally(() => { _refreshPromise = null; }); }
-  const newToken = await _refreshPromise;
-  if (newToken) setAccessToken(newToken);
-  return newToken;
-}
-async function apiFetch(path: string, options?: RequestInit) {
-  const token = await _getValidToken();
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options?.headers as Record<string, string>) };
-  if (token) headers['Authorization'] = 'Bearer ' + token;
-  const res = await fetch(API_BASE + path, { credentials: 'include', ...options, headers });
-  if (res.status === 401) {
+    const token = getAccessToken();
+    if (token) return token;
     if (!_refreshPromise) { _refreshPromise = refreshRequest().finally(() => { _refreshPromise = null; }); }
     const newToken = await _refreshPromise;
-    if (!newToken) { if (typeof window !== 'undefined') window.location.href = '/login'; throw new Error('Session expired'); }
-    setAccessToken(newToken);
-    const retryRes = await fetch(API_BASE + path, { credentials: 'include', ...options, headers: { ...headers, 'Authorization': 'Bearer ' + newToken } });
-    if (!retryRes.ok) { const err = await retryRes.json().catch(() => ({ error: retryRes.statusText })); throw new Error(err.error || 'API error ' + retryRes.status); }
-    return retryRes.json();
-  }
-  if (!res.ok) { const err = await res.json().catch(() => ({ error: res.statusText })); throw new Error(err.error || 'API error ' + res.status); }
-  return res.json();
+    if (newToken) setAccessToken(newToken);
+    return newToken;
 }
+async function apiFetch(path: string, options?: RequestInit) {
+    const isGet = !options?.method || options.method === 'GET';
+    const cacheKey = isGet ? path : null;
+    if (cacheKey) {
+          const cached = _cache.get(cacheKey);
+          if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
+          const existing = _inflight.get(cacheKey);
+          if (existing) return existing;
+    }
+    const token = await _getValidToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options?.headers as Record<string, string>) };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+    const doFetch = async (): Promise<any> => {
+          try {
+                  const res = await fetch(API_BASE + path, { credentials: 'include', ...options, headers, signal: controller.signal });
+                  clearTimeout(timer);
+                  if (res.status === 401) {
+                            if (!_refreshPromise) { _refreshPromise = refreshRequest().finally(() => { _refreshPromise = null; }); }
+                            const newToken = await _refreshPromise;
+                            if (!newToken) { if (typeof window !== 'undefined') window.location.href = '/login'; throw new Error('Session expired'); }
+                            setAccessToken(newToken);
+                            const retryRes = await fetch(API_BASE + path, { credentials: 'include', ...options, headers: { ...headers, 'Authorization': 'Bearer ' + newToken } });
+                            if (!retryRes.ok) { const err = await retryRes.json().catch(() => ({ error: retryRes.statusText })); throw new Error(err.error || 'API error ' + retryRes.status); }
+                            const data = await retryRes.json();
+                            if (cacheKey) { _cache.set(cacheKey, { data, ts: Date.now() }); _inflight.delete(cacheKey); }
+                            return data;
+                  }
+                  if (!res.ok) { const err = await res.json().catch(() => ({ error: res.statusText })); throw new Error(err.error || 'API error ' + res.status); }
+                  const data = await res.json();
+                  if (cacheKey) { _cache.set(cacheKey, { data, ts: Date.now() }); _inflight.delete(cacheKey); }
+                  return data;
+          } catch (e: any) {
+                  clearTimeout(timer);
+                  if (cacheKey) _inflight.delete(cacheKey);
+                  if (e.name === 'AbortError') throw new Error('Request timed out');
+                  throw e;
+          }
+    };
+    const promise = doFetch();
+    if (cacheKey) _inflight.set(cacheKey, promise);
+    return promise;
+}
+export function invalidateCache(path?: string) { if (path) { _cache.delete(path); } else { _cache.clear(); } }
+export default apiFetch;
 export const getPlatformHealth = () => apiFetch('/api/platform/health');
 export const getModuleHealth = () => apiFetch('/api/platform/modules');
 export const getPlatformModules = () => apiFetch('/api/platform/modules');
@@ -54,8 +87,7 @@ export const getSalesPerformance = () => apiFetch('/api/sales/performance');
 export const getExecutiveSummary = () => apiFetch('/api/executive/summary');
 export const getExecutiveBriefing = () => apiFetch('/api/executive/briefing');
 export const getLearningInsights = () => apiFetch('/api/learning/performance');
-export const getLearningOptimizations = () => apiFetch('/api/learning/optimizations');
+export const getLearningModels = () => apiFetch('/api/learning/models');
 export const getCostAnalysis = () => apiFetch('/api/platform/costs');
 export const sendCopilotMessage = (question: string, session_id?: string) => apiFetch('/api/copilot/chat', { method: 'POST', body: JSON.stringify({ question, session_id }) });
-export const getCopilotHistory = () => apiFetch('/api/copilot/history');
-export default apiFetch;
+export const getCEODashboard = () => apiFetch('/api/dashboard/ceo');
